@@ -9,7 +9,7 @@ service cloud.firestore {
     // === substituir após primeiro login com Google ===
     function allowed() {
       return request.auth != null
-          && request.auth.uid == 'PLACEHOLDER_REPLACE_WITH_YOUR_UID';
+          && request.auth.uid == '2bt4pkNlyOgDm9VnSiR9IE6CyVR2';
     }
 
     // Coleções do app — tudo passa pela função allowed()
