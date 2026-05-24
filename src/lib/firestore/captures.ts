@@ -2,10 +2,11 @@ import "server-only";
 
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { adminDb } from "@/lib/firebase/admin";
-import { USER_ID, localDateKey } from "@/lib/userConfig";
+import { USER_ID, USER_TIMEZONE, localDateKey } from "@/lib/userConfig";
 import { embedText } from "@/lib/embeddings";
 import {
   COL,
+  dueDateFromScheduledTo,
   type Classification,
   type CaptureSource,
   type RawCaptureDoc,
@@ -64,15 +65,21 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     mercadoItems = result.itemsMarked;
   } else if (input.classification.kind === "task" || input.classification.kind === "decision") {
     const taskRef = db.collection(COL.tasks).doc();
+    const resolvedDue = dueDateFromScheduledTo(
+      input.classification.scheduled_to,
+      input.classification.due_date,
+      USER_TIMEZONE,
+    );
     const task: TaskDoc = {
       user_id: USER_ID,
       title: input.classification.title,
       description: input.classification.summary,
       urgency: input.classification.urgency,
+      scheduled_to: input.classification.scheduled_to,
       key: input.classification.key,
       priority_score: priorityScore(input.classification),
       tags: input.classification.tags,
-      due_date: input.classification.due_date,
+      due_date: resolvedDue,
       owner: USER_ID,
       entity_id: null, // resolução de entity virá depois
       capture_id: captureRef.id,

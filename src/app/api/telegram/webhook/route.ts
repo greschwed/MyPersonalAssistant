@@ -142,18 +142,22 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     return;
   }
 
-  // Default: task/decision/note/idea/meal/habit_log → keyboard de urgência+key
-  const urgencyLabel = {
-    today: "Hoje",
-    this_week: "Semana",
-    this_month: "Mês",
-    someday: "Algum dia",
-  }[classification.urgency];
+  // Default: task/decision/note/idea/meal/habit_log → keyboard de scheduled_to+key
+  const scheduledLabel = {
+    hoje: "Hoje",
+    amanha: "Amanhã",
+    esta_semana: "Esta semana",
+    este_mes: "Este mês",
+    data_especifica: "Data específica",
+  }[classification.scheduled_to];
 
   const lines = [
-    `✅ Capturado — ${classification.kind} / ${urgencyLabel}${classification.key ? " · KEY" : ""}`,
+    `✅ Capturado — ${classification.kind} / ${scheduledLabel}${classification.key ? " · KEY" : ""}`,
     classification.title,
   ];
+  if (classification.due_date) {
+    lines.push(`due: ${classification.due_date}`);
+  }
   if (classification.tags.length > 0) {
     lines.push(`tags: ${classification.tags.map((t) => `#${t}`).join(" ")}`);
   }

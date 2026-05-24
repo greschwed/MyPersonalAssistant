@@ -6,6 +6,26 @@ import type { Timestamp, FieldValue } from "firebase-admin/firestore";
 export const URGENCY = ["today", "this_week", "this_month", "someday"] as const;
 export type Urgency = (typeof URGENCY)[number];
 
+// Novo modelo de agendamento usado no UI. Substitui urgency na ponta.
+// urgency continua sendo derivado a partir daqui pra compatibilidade
+// com queries/sort/legacy data.
+export const SCHEDULED_TO = [
+  "hoje",
+  "amanha",
+  "esta_semana",
+  "este_mes",
+  "data_especifica",
+] as const;
+export type ScheduledTo = (typeof SCHEDULED_TO)[number];
+
+export const SCHEDULED_TO_LABEL: Record<ScheduledTo, string> = {
+  hoje: "Hoje",
+  amanha: "Amanhã",
+  esta_semana: "Esta semana",
+  este_mes: "Este mês",
+  data_especifica: "Data específica",
+};
+
 export const KIND = [
   "task",
   "decision",
@@ -58,6 +78,9 @@ export type Classification = {
   // Específico de kind="task" e kind="decision": separação pessoal/trabalho + projeto livre.
   scope: Scope;
   project: string | null;
+  // Quando agendado. due_date é auto-derivado pra hoje/amanha, obrigatório pra
+  // data_especifica, null pra esta_semana/este_mes.
+  scheduled_to: ScheduledTo;
   // Específico de kind="bill": conta a pagar, valor + recorrência.
   bill_amount: number | null;
   bill_currency: string;       // default "BRL"
@@ -84,7 +107,8 @@ export type TaskDoc = {
   user_id: string;
   title: string;
   description: string;
-  urgency: Urgency;
+  urgency: Urgency;          // derivado de scheduled_to, mantido pra compat
+  scheduled_to: ScheduledTo; // canonical no UI
   key: boolean;
   priority_score: number;
   tags: string[];
@@ -249,6 +273,11 @@ export function sanitizeClassification(
       ? (raw.scope as Scope)
       : "pessoal";
 
+  const scheduledTo: ScheduledTo =
+    (SCHEDULED_TO as readonly string[]).includes(String(raw.scheduled_to))
+      ? (raw.scheduled_to as ScheduledTo)
+      : urgencyToScheduledTo(urgency, due);
+
   const project = typeof raw.project === "string" && raw.project.trim().length > 0
     ? raw.project.trim().toLowerCase().replace(/[^a-z0-9_\- ]+/g, "").slice(0, 60) || null
     : null;
@@ -285,9 +314,65 @@ export function sanitizeClassification(
     mercado_items: mercadoItems,
     scope,
     project,
+    scheduled_to: scheduledTo,
     bill_amount: billAmount,
     bill_currency: billCurrency,
     bill_category: billCategory,
     bill_recurrence: billRecurrence,
   };
+}
+
+// === HELPERS scheduled_to <-> urgency / due_date ===
+
+// Calcula due_date no fuso fornecido. Para evitar dependência circular com
+// userConfig, recebe tz como parâmetro.
+export function dueDateFromScheduledTo(
+  scheduled: ScheduledTo,
+  explicitDue: string | null,
+  tz: string,
+): string | null {
+  if (scheduled === "data_especifica") return explicitDue;
+  if (scheduled === "esta_semana" || scheduled === "este_mes") return null;
+
+  const today = new Date();
+  if (scheduled === "amanha") today.setDate(today.getDate() + 1);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(today);
+}
+
+// Para compatibilidade com queries/sort que ainda usam urgency.
+export function urgencyFromScheduledTo(scheduled: ScheduledTo): Urgency {
+  switch (scheduled) {
+    case "hoje":
+      return "today";
+    case "amanha":
+    case "esta_semana":
+      return "this_week";
+    case "este_mes":
+      return "this_month";
+    case "data_especifica":
+      return "this_week"; // peso médio — data específica pode ser hoje ou longe
+  }
+}
+
+// Para backfill de tasks legadas (sem scheduled_to).
+export function urgencyToScheduledTo(
+  urgency: Urgency,
+  dueDate: string | null,
+): ScheduledTo {
+  if (dueDate) return "data_especifica";
+  switch (urgency) {
+    case "today":
+      return "hoje";
+    case "this_week":
+      return "esta_semana";
+    case "this_month":
+      return "este_mes";
+    case "someday":
+      return "este_mes";
+  }
 }

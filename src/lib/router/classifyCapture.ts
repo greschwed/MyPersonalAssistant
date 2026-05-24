@@ -6,6 +6,7 @@ import { USER_TIMEZONE } from "@/lib/userConfig";
 import {
   type Classification,
   KIND,
+  SCHEDULED_TO,
   URGENCY,
   sanitizeClassification,
 } from "@/lib/schema";
@@ -17,7 +18,8 @@ You read raw captures (voice transcripts or short text notes, almost always in B
 Output schema (ALL fields required, even if empty/null):
 {
   "kind": one of ${JSON.stringify(KIND)},
-  "urgency": one of ${JSON.stringify(URGENCY)},
+  "urgency": one of ${JSON.stringify(URGENCY)},   // legacy / internal weighting
+  "scheduled_to": one of ${JSON.stringify(SCHEDULED_TO)}, // canonical UI value (overrides urgency)
   "key": boolean,
   "title": short title <= 80 chars (imperative for tasks, descriptive for notes/meals),
   "summary": 1-2 sentence neutral summary <= 240 chars,
@@ -48,16 +50,22 @@ Output schema (ALL fields required, even if empty/null):
 "bill" — conta a pagar com valor e/ou vencimento. Triggers: "boleto X vence dia Y", "pagar conta de luz R$ 350", "fatura cartão R$ 2400 até 15/06", "IPTU 1200 reais", "aluguel R$ 3000 todo dia 5", "internet 99,90 mensal", "Netflix R$ 55 por mês". Big single bills ("multa de trânsito R$ 200") count too.
 "person" — purely a person reference (rare on its own).
 
-=== URGENCY ===
+=== SCHEDULED_TO (CANONICAL — use this) ===
 
-URGENCY is "attention horizon", not strict deadline. Default reasoning:
-- "hoje", "agora", "urgente", "ASAP" → "today"
-- short concrete errands without time signal ("comprar açúcar", "ligar pro João") → "today" (small same-day actions)
-- "amanhã", "essa semana", "sexta", "até X dias" → "this_week"
-- "esse mês", "fim do mês" → "this_month"
-- vague intent, no concrete handle → "someday"
+scheduled_to captures WHEN the user plans to handle this item. Set both
+scheduled_to AND urgency consistently (they convey the same idea, urgency
+is just an old internal field used for sorting).
 
-For kind="mercado" / "mercado_purchase" / "meal" / "habit_log" → urgency MUST be "someday" (these aren't action items with a horizon).
+Mapping rules:
+- "hoje", "agora", "urgente", "ASAP" → scheduled_to="hoje" (urgency="today")
+- short concrete errands without explicit time ("comprar açúcar", "ligar pro João") → scheduled_to="hoje" (urgency="today")
+- "amanhã" → scheduled_to="amanha" (urgency="this_week")
+- "essa semana", "essa sexta", "até X dias (X<=7)" → scheduled_to="esta_semana" (urgency="this_week")
+- "esse mês", "fim do mês", vago no horizonte de dias-semanas → scheduled_to="este_mes" (urgency="this_month")
+- Data específica mencionada (15/06, 28/05, "no dia 20") → scheduled_to="data_especifica" + due_date no formato YYYY-MM-DD (urgency="this_week")
+- Sem sinal nenhum e tipo "algum dia" → scheduled_to="este_mes" (urgency="someday")
+
+For kind="mercado" / "mercado_purchase" / "meal" / "habit_log" / "bill" → scheduled_to="este_mes" (no UI horizon dimension), urgency="someday".
 
 === KEY ===
 true ONLY when user explicitly signals critical/blocker/top-priority ("urgente", "crítico", "preciso muito"). Default false.

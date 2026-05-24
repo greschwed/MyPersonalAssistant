@@ -2,7 +2,13 @@ import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase/admin";
 import { getSessionUser } from "@/lib/firebase/session";
 import { USER_ID } from "@/lib/userConfig";
-import { COL, type Scope, type TaskDoc } from "@/lib/schema";
+import {
+  COL,
+  type Scope,
+  type ScheduledTo,
+  type TaskDoc,
+  urgencyToScheduledTo,
+} from "@/lib/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,6 +18,7 @@ type TaskRow = {
   title: string;
   description: string;
   urgency: TaskDoc["urgency"];
+  scheduled_to: ScheduledTo;
   key: boolean;
   priority_score: number;
   tags: string[];
@@ -20,6 +27,8 @@ type TaskRow = {
   project: string | null;
   capture_id: string | null;
   createdAt: string | null;
+  completed: boolean;
+  completedAt: string | null;
 };
 
 function toIso(value: unknown): string | null {
@@ -44,31 +53,33 @@ export async function GET(req: Request) {
     .get();
 
   const all: TaskRow[] = snap.docs.map((d) => {
-    const data = d.data() as TaskDoc;
+    const data = d.data() as TaskDoc & { scheduled_to?: ScheduledTo };
+    const completedAtIso = toIso(data.completed_at);
+    const scheduled =
+      data.scheduled_to ?? urgencyToScheduledTo(data.urgency, data.due_date ?? null);
     return {
       id: d.id,
       title: data.title ?? "",
       description: data.description ?? "",
       urgency: data.urgency,
+      scheduled_to: scheduled,
       key: Boolean(data.key),
       priority_score: data.priority_score ?? 0,
       tags: data.tags ?? [],
       due_date: data.due_date ?? null,
-      // Backfill defensivo: tasks antigas (pré-migração) podem não ter scope/project
       scope: (data.scope as Scope) ?? "pessoal",
       project: data.project ?? null,
       capture_id: data.capture_id ?? null,
       createdAt: toIso(data.created_at),
+      completed: Boolean(completedAtIso),
+      completedAt: completedAtIso,
     };
   });
 
   const filtered = all.filter((t) => {
-    const isOpen = !snap.docs.find(
-      (d) => d.id === t.id && (d.data() as TaskDoc).completed_at,
-    );
     if (statusParam === "all") return true;
-    if (statusParam === "done") return !isOpen;
-    return isOpen;
+    if (statusParam === "done") return t.completed;
+    return !t.completed;
   });
 
   // Sort: priority_score desc, then due_date asc, then createdAt desc
