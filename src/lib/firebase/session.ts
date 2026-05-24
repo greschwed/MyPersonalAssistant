@@ -2,7 +2,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { adminAuth } from "./admin";
-import { ALLOWED_FIREBASE_UID } from "../userConfig";
+import { isUidAllowed } from "../userConfig";
 
 export const SESSION_COOKIE = "__session";
 const FIVE_DAYS = 60 * 60 * 24 * 5 * 1000;
@@ -20,9 +20,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 
   try {
     const decoded = await adminAuth.verifySessionCookie(sessionCookie, true);
-    if (ALLOWED_FIREBASE_UID && decoded.uid !== ALLOWED_FIREBASE_UID) {
-      return null;
-    }
+    if (!isUidAllowed(decoded.uid)) return null;
     return { uid: decoded.uid, email: decoded.email ?? null };
   } catch {
     return null;

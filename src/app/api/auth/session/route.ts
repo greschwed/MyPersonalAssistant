@@ -5,7 +5,7 @@ import {
   createSessionCookie,
   sessionCookieOptions,
 } from "@/lib/firebase/session";
-import { ALLOWED_FIREBASE_UID } from "@/lib/userConfig";
+import { isUidAllowed } from "@/lib/userConfig";
 
 export const runtime = "nodejs";
 
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid idToken" }, { status: 401 });
   }
 
-  if (ALLOWED_FIREBASE_UID && decoded.uid !== ALLOWED_FIREBASE_UID) {
+  if (!isUidAllowed(decoded.uid)) {
     return NextResponse.json({ error: "unauthorized uid" }, { status: 403 });
   }
 

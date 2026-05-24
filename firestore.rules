@@ -6,10 +6,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // === substituir após primeiro login com Google ===
+    // === UIDs autorizados (substituir conforme rotacionar contas) ===
     function allowed() {
       return request.auth != null
-          && request.auth.uid == '2bt4pkNlyOgDm9VnSiR9IE6CyVR2';
+          && request.auth.uid in [
+               '2bt4pkNlyOgDm9VnSiR9IE6CyVR2',  // gregory.w.schwed@gmail.com
+               'dyqBuBmYLYggDX6U12eKixOzdYR2'   // gregory.schwed@mevo.com.br
+             ];
     }
 
     // Coleções do app — tudo passa pela função allowed()
