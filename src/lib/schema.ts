@@ -38,6 +38,7 @@ export const KIND = [
   "mercado",          // adiciona itens à lista de compras de supermercado
   "mercado_purchase", // marca itens da lista como comprados
   "bill",             // conta a pagar (com amount + due_date)
+  "query",            // pergunta / pedido de listagem (não cria registro, responde)
 ] as const;
 export type CaptureKind = (typeof KIND)[number];
 

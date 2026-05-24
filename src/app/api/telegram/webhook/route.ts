@@ -12,6 +12,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { COL, type RawCaptureDoc, URGENCY, type Urgency } from "@/lib/schema";
 import { FieldValue } from "firebase-admin/firestore";
 import { USER_ID } from "@/lib/userConfig";
+import { answerQuestion } from "@/lib/llm/answerQuestion";
 
 export const runtime = "nodejs";
 
@@ -85,8 +86,38 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     return;
   }
 
-  // 4) Classifica + grava
+  // 4) Classifica
   const classification = await classifyCapture(rawText);
+
+  // 4.a) Se for pergunta/listagem, responde direto SEM criar raw_capture
+  if (classification.kind === "query") {
+    try {
+      const { answer } = await answerQuestion(rawText);
+      await sendMessage({
+        chatId: msg.chat.id,
+        text: answer,
+        replyToMessageId: msg.message_id,
+      });
+      await adminDb.collection(COL.auditLog).add({
+        user_id: USER_ID,
+        action: "query_answered",
+        resource_type: "query",
+        resource_id: null,
+        metadata: { source, question: rawText.slice(0, 500), answer_chars: answer.length },
+        created_at: FieldValue.serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("[telegram] query failed:", err);
+      await sendMessage({
+        chatId: msg.chat.id,
+        text: "❗ Não consegui responder agora. Tenta de novo em alguns segundos.",
+        replyToMessageId: msg.message_id,
+      });
+    }
+    return;
+  }
+
+  // 4.b) Demais kinds: grava o capture
   const result = await ingestCapture({
     source,
     rawText,

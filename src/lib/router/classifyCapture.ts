@@ -48,6 +48,14 @@ Output schema (ALL fields required, even if empty/null):
 "mercado" — adding items to grocery shopping list. Triggers: "comprar açúcar", "tá faltando leite", "preciso de feijão", "no mercado: X, Y, Z", "adicionar X na lista de compras".
 "mercado_purchase" — registering that user finished grocery shopping. Trigger phrase: "Registrar compra de Mercado" (and close variants like "registrar compras do mercado", "registrar a compra do mercado").
 "bill" — conta a pagar com valor e/ou vencimento. Triggers: "boleto X vence dia Y", "pagar conta de luz R$ 350", "fatura cartão R$ 2400 até 15/06", "IPTU 1200 reais", "aluguel R$ 3000 todo dia 5", "internet 99,90 mensal", "Netflix R$ 55 por mês". Big single bills ("multa de trânsito R$ 200") count too.
+"query" — user is asking a question or requesting a listing/status of existing data. DO NOT confuse with task. Triggers:
+  - Listings: "liste X", "lista de Y", "mostre meus Z", "ver minhas tarefas", "ver mercado"
+  - Status: "quanto tenho em X", "quantos Y", "qual a situação de Z"
+  - Questions: anything ending in "?", "tem X?", "ainda preciso de Y?"
+  - Time-based queries: "o que tenho pra hoje?", "que reuniões essa semana?"
+  - Recall: "o que eu disse sobre X?", "lembra quando eu falei de Y?"
+  Title should be the rephrased question, summary a 1-line clarification, tags empty or single-word topic.
+  For query, set scheduled_to="este_mes" and urgency="someday" (não tem horizonte de ação).
 "person" — purely a person reference (rare on its own).
 
 === SCHEDULED_TO (CANONICAL — use this) ===
@@ -86,11 +94,13 @@ When kind="mercado_purchase":
 
 === CRITICAL DISAMBIGUATION ===
 
-Future intent vs past completion is the #1 source of errors. Be strict:
+Future intent vs past completion vs question is the #1 source of errors. Be strict:
 - "fazer X amanhã" / "vou fazer X" / "amanhã, fazer X" → kind="task" (FUTURE) with due_date inferred.
 - "fiz X" / "treinei" / "corri" / "tomei" → kind="habit_log" (PAST).
 - "ligar pra X" → kind="task" (intent to do).
 - "comi X" → kind="meal".
+- "liste X" / "que tem na X" / "quantos X" / "?" → kind="query" (perguntando sobre estado, NÃO criar task).
+- "Listar lista de compras" → kind="query" (pedido de visualização, não tarefa).
 
 === SCOPE: PESSOAL VS TRABALHO ===
 
