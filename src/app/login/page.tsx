@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithGoogle } from "@/lib/firebase/auth";
+import { UnauthorizedAccountError, signInWithGoogle } from "@/lib/firebase/auth";
 
 function LoginForm() {
   const router = useRouter();
@@ -10,7 +10,7 @@ function LoginForm() {
   const from = searchParams.get("from") ?? "/";
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; unauthorized: boolean } | null>(null);
 
   async function handleSignIn() {
     setLoading(true);
@@ -20,7 +20,14 @@ function LoginForm() {
       router.replace(from);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha no login");
+      if (err instanceof UnauthorizedAccountError) {
+        setError({ message: err.message, unauthorized: true });
+      } else {
+        setError({
+          message: err instanceof Error ? err.message : "Falha no login",
+          unauthorized: false,
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -46,11 +53,28 @@ function LoginForm() {
       </button>
 
       {error && (
-        <p className="text-xs text-[var(--danger)] font-mono">{error}</p>
+        <div
+          className={`rounded-md border px-3 py-2 text-xs leading-relaxed ${
+            error.unauthorized
+              ? "border-[var(--warn)]/40 bg-[var(--warn)]/10 text-[var(--ink-4)]"
+              : "border-[var(--danger)]/40 bg-[var(--danger)]/10 text-[var(--danger)] font-mono"
+          }`}
+        >
+          {error.unauthorized ? (
+            <>
+              <p>{error.message}</p>
+              <p className="mt-1 text-[var(--ink-3)]">
+                Tente novamente com a conta do operador.
+              </p>
+            </>
+          ) : (
+            <p>{error.message}</p>
+          )}
+        </div>
       )}
 
       <p className="text-[10px] text-[var(--ink-3)] font-mono">
-        Apenas o UID autorizado pode entrar.
+        Acesso restrito ao operador autorizado.
       </p>
     </div>
   );
