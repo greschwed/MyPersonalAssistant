@@ -1,0 +1,46 @@
+rules_version = '2';
+
+// Personal OS — usuário único.
+// Tudo é negado por padrão; só passa request.auth.uid == ALLOWED_UID (definido abaixo).
+// Quando rotacionar UID, atualizar AQUI e republish (firebase deploy --only firestore:rules).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // === substituir após primeiro login com Google ===
+    function allowed() {
+      return request.auth != null
+          && request.auth.uid == 'PLACEHOLDER_REPLACE_WITH_YOUR_UID';
+    }
+
+    // Coleções do app — tudo passa pela função allowed()
+    match /users/{userId} {
+      allow read, write: if allowed() && userId == request.auth.uid;
+    }
+    match /entities/{entityId} {
+      allow read, write: if allowed();
+    }
+    match /raw_captures/{captureId} {
+      allow read, write: if allowed();
+    }
+    match /tasks/{taskId} {
+      allow read, write: if allowed();
+    }
+    match /daily_logs/{logId} {
+      allow read, write: if allowed();
+    }
+    match /memory_chunks/{chunkId} {
+      allow read, write: if allowed();
+    }
+    match /audit_log/{eventId} {
+      allow read: if allowed();
+      allow create: if allowed();
+      // imutável depois de criado
+      allow update, delete: if false;
+    }
+
+    // bloqueia qualquer outra coleção por padrão
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
