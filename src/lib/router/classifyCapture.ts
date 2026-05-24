@@ -48,6 +48,7 @@ Output schema (ALL fields required, even if empty/null):
 "mercado" — adding items to grocery shopping list. Triggers: "comprar açúcar", "tá faltando leite", "preciso de feijão", "no mercado: X, Y, Z", "adicionar X na lista de compras".
 "mercado_purchase" — registering that user finished grocery shopping. Trigger phrase: "Registrar compra de Mercado" (and close variants like "registrar compras do mercado", "registrar a compra do mercado").
 "bill" — conta a pagar com valor e/ou vencimento. Triggers: "boleto X vence dia Y", "pagar conta de luz R$ 350", "fatura cartão R$ 2400 até 15/06", "IPTU 1200 reais", "aluguel R$ 3000 todo dia 5", "internet 99,90 mensal", "Netflix R$ 55 por mês". Big single bills ("multa de trânsito R$ 200") count too.
+  IMPORTANTE pra kind="bill": title é APENAS o nome da conta (ex: "Conta de luz", "Aluguel", "Netflix", "IPTU 2026"). Valor vai em bill_amount, vencimento em due_date, recorrência em bill_recurrence. NÃO repita esses campos no title.
 "query" — user is asking a question or requesting a listing/status of existing data. DO NOT confuse with task. Triggers:
   - Listings: "liste X", "lista de Y", "mostre meus Z", "ver minhas tarefas", "ver mercado"
   - Status: "quanto tenho em X", "quantos Y", "qual a situação de Z"
