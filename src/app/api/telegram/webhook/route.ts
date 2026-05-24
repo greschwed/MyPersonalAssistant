@@ -95,7 +95,34 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     classification,
   });
 
-  // 5) Confirma com keyboard inline pra você sobrescrever urgência com um toque
+  // 5) Resposta dependente do tipo
+  if (classification.kind === "mercado") {
+    const items = result.mercadoItems ?? [];
+    const lines = items.length
+      ? [`🛒 Adicionado à lista de mercado (${items.length}):`, ...items.map((i) => `• ${i}`)]
+      : ["🛒 Tentei adicionar à lista de mercado, mas não identifiquei nenhum item."];
+    await sendMessage({
+      chatId: msg.chat.id,
+      text: lines.join("\n"),
+      replyToMessageId: msg.message_id,
+    });
+    return;
+  }
+
+  if (classification.kind === "mercado_purchase") {
+    const items = result.mercadoItems ?? [];
+    const text = items.length
+      ? `✅ Compra de mercado registrada — ${items.length} item${items.length > 1 ? "s" : ""} marcado${items.length > 1 ? "s" : ""} como comprado:\n${items.map((i) => `• ${i}`).join("\n")}`
+      : "⚠️ Nenhum item pendente na lista de mercado pra marcar como comprado.";
+    await sendMessage({
+      chatId: msg.chat.id,
+      text,
+      replyToMessageId: msg.message_id,
+    });
+    return;
+  }
+
+  // Default: task/decision/note/idea/meal/habit_log → keyboard de urgência+key
   const urgencyLabel = {
     today: "Hoje",
     this_week: "Semana",
@@ -104,8 +131,8 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
   }[classification.urgency];
 
   const lines = [
-    `✅ Capturado — *${classification.kind}* / ${urgencyLabel}${classification.key ? " · KEY" : ""}`,
-    `_${classification.title}_`,
+    `✅ Capturado — ${classification.kind} / ${urgencyLabel}${classification.key ? " · KEY" : ""}`,
+    classification.title,
   ];
   if (classification.tags.length > 0) {
     lines.push(`tags: ${classification.tags.map((t) => `#${t}`).join(" ")}`);
@@ -115,7 +142,6 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     chatId: msg.chat.id,
     text: lines.join("\n"),
     replyToMessageId: msg.message_id,
-    parseMode: "Markdown",
     inlineKeyboard: [
       [
         { text: "Hoje", callback_data: `urg:today:${result.captureId}` },

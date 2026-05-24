@@ -15,8 +15,13 @@ export const KIND = [
   "person",
   "meal",
   "habit_log",
+  "mercado",          // adiciona itens à lista de compras de supermercado
+  "mercado_purchase", // marca itens da lista como comprados
 ] as const;
 export type CaptureKind = (typeof KIND)[number];
+
+export const MERCADO_STATUS = ["A Comprar", "Comprado"] as const;
+export type MercadoStatus = (typeof MERCADO_STATUS)[number];
 
 export const SOURCE = ["telegram_voice", "telegram_text", "web_form", "api"] as const;
 export type CaptureSource = (typeof SOURCE)[number];
@@ -33,6 +38,10 @@ export type Classification = {
   due_date: string | null; // ISO date YYYY-MM-DD ou null
   llm_source: "anthropic" | "openai" | "regex";
   notes: string | null;
+  // Específico de kind="mercado" e kind="mercado_purchase":
+  // - mercado: lista de itens a adicionar à lista (1+ itens)
+  // - mercado_purchase: itens específicos a marcar como comprados; [] = todos pendentes
+  mercado_items: string[];
 };
 
 // === FIRESTORE TYPES ===
@@ -44,8 +53,9 @@ export type RawCaptureDoc = {
   audio_url: string | null;
   transcription_source: "whisper" | "telegram" | "none";
   classification: Classification;
-  routed_to: "tasks" | "daily_logs" | "raw_captures" | null;
+  routed_to: "tasks" | "daily_logs" | "raw_captures" | "mercado" | "mercado_purchase" | null;
   routed_id: string | null;
+  routed_ids: string[]; // sempre array (0..N); mercado pode rotear pra múltiplos docs
   created_at: Timestamp | FieldValue;
 };
 
@@ -120,6 +130,16 @@ export type MemoryChunkDoc = {
   created_at: Timestamp | FieldValue;
 };
 
+export type MercadoItemDoc = {
+  user_id: string;
+  item: string;
+  raw_text: string;
+  capture_id: string;
+  status: MercadoStatus;
+  bought_at: Timestamp | null;
+  created_at: Timestamp | FieldValue;
+};
+
 export type AuditLogDoc = {
   user_id: string;
   action: string;
@@ -138,6 +158,7 @@ export const COL = {
   dailyLogs: "daily_logs",
   memoryChunks: "memory_chunks",
   auditLog: "audit_log",
+  mercado: "mercado",
 } as const;
 
 // Validador defensivo do output do LLM — nunca confiar 100%.
@@ -175,6 +196,14 @@ export function sanitizeClassification(
     ? raw.entity_hint.trim().slice(0, 120)
     : null;
 
+  const mercadoItems = Array.isArray(raw.mercado_items)
+    ? raw.mercado_items
+        .filter((s): s is string => typeof s === "string")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0 && s.length <= 80)
+        .slice(0, 50)
+    : [];
+
   return {
     kind,
     urgency,
@@ -186,5 +215,6 @@ export function sanitizeClassification(
     due_date: due,
     llm_source: fallback.llmSource,
     notes: typeof raw.notes === "string" ? raw.notes.slice(0, 500) : null,
+    mercado_items: mercadoItems,
   };
 }

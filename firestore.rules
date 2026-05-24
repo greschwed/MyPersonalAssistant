@@ -31,6 +31,9 @@ service cloud.firestore {
     match /memory_chunks/{chunkId} {
       allow read, write: if allowed();
     }
+    match /mercado/{itemId} {
+      allow read, write: if allowed();
+    }
     match /audit_log/{eventId} {
       allow read: if allowed();
       allow create: if allowed();

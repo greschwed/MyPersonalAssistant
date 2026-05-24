@@ -11,6 +11,7 @@ import {
   type RawCaptureDoc,
   type TaskDoc,
   type DailyLogDoc,
+  type MercadoItemDoc,
 } from "@/lib/schema";
 
 type IngestInput = {
@@ -25,7 +26,10 @@ export type IngestResult = {
   captureId: string;
   routedTo: RawCaptureDoc["routed_to"];
   routedId: string | null;
+  routedIds: string[];
   memoryChunkId: string | null;
+  // Específico de mercado: itens criados / itens marcados como comprados
+  mercadoItems?: string[];
 };
 
 function priorityScore(c: Classification): number {
@@ -41,9 +45,23 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
 
   let routedTo: RawCaptureDoc["routed_to"] = "raw_captures";
   let routedId: string | null = null;
+  let routedIds: string[] = [];
+  let mercadoItems: string[] | undefined;
 
   // 1) Decide a coleção alvo + grava o documento downstream
-  if (input.classification.kind === "task" || input.classification.kind === "decision") {
+  if (input.classification.kind === "mercado") {
+    const result = await addMercadoItems(db, input.classification, input.rawText, captureRef.id);
+    routedTo = "mercado";
+    routedIds = result.itemIds;
+    routedId = result.itemIds[0] ?? null;
+    mercadoItems = result.itemsAdded;
+  } else if (input.classification.kind === "mercado_purchase") {
+    const result = await registerMercadoPurchase(db, input.classification);
+    routedTo = "mercado_purchase";
+    routedIds = result.itemIds;
+    routedId = result.itemIds[0] ?? null;
+    mercadoItems = result.itemsMarked;
+  } else if (input.classification.kind === "task" || input.classification.kind === "decision") {
     const taskRef = db.collection(COL.tasks).doc();
     const task: TaskDoc = {
       user_id: USER_ID,
@@ -64,6 +82,7 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     await taskRef.set(task);
     routedTo = "tasks";
     routedId = taskRef.id;
+    routedIds = [taskRef.id];
   } else if (input.classification.kind === "meal" || input.classification.kind === "habit_log") {
     const date = localDateKey();
     const logId = `${USER_ID}_${date}`;
@@ -76,6 +95,7 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     }
     routedTo = "daily_logs";
     routedId = logRef.id;
+    routedIds = [logRef.id];
   }
   // notes, ideas, journals → ficam só em raw_captures (queryáveis via memory)
 
@@ -89,6 +109,7 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     classification: input.classification,
     routed_to: routedTo,
     routed_id: routedId,
+    routed_ids: routedIds,
     created_at: now,
   };
   await captureRef.set(captureDoc);
@@ -132,8 +153,70 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     captureId: captureRef.id,
     routedTo,
     routedId,
+    routedIds,
     memoryChunkId,
+    mercadoItems,
   };
+}
+
+async function addMercadoItems(
+  db: Firestore,
+  classification: Classification,
+  rawText: string,
+  captureId: string,
+): Promise<{ itemIds: string[]; itemsAdded: string[] }> {
+  const now = FieldValue.serverTimestamp();
+  const items = classification.mercado_items.filter((i) => i.length > 0);
+  const itemIds: string[] = [];
+  const itemsAdded: string[] = [];
+
+  // Cria um doc por item. Não dedupa contra a lista pré-existente — assumimos que
+  // se o usuário falou de novo, é porque acabou ou quer mais.
+  for (const item of items) {
+    const ref = db.collection(COL.mercado).doc();
+    const doc: MercadoItemDoc = {
+      user_id: USER_ID,
+      item,
+      raw_text: rawText.slice(0, 300),
+      capture_id: captureId,
+      status: "A Comprar",
+      bought_at: null,
+      created_at: now,
+    };
+    await ref.set(doc);
+    itemIds.push(ref.id);
+    itemsAdded.push(item);
+  }
+  return { itemIds, itemsAdded };
+}
+
+async function registerMercadoPurchase(
+  db: Firestore,
+  classification: Classification,
+): Promise<{ itemIds: string[]; itemsMarked: string[] }> {
+  const requested = classification.mercado_items.map((i) => i.toLowerCase());
+  const snap = await db
+    .collection(COL.mercado)
+    .where("user_id", "==", USER_ID)
+    .where("status", "==", "A Comprar")
+    .get();
+
+  const matching = requested.length === 0
+    ? snap.docs
+    : snap.docs.filter((d) => {
+        const item = String((d.data() as MercadoItemDoc).item).toLowerCase();
+        return requested.some((r) => item.includes(r) || r.includes(item));
+      });
+
+  const itemIds: string[] = [];
+  const itemsMarked: string[] = [];
+  const now = FieldValue.serverTimestamp();
+  for (const d of matching) {
+    await d.ref.update({ status: "Comprado", bought_at: now });
+    itemIds.push(d.id);
+    itemsMarked.push((d.data() as MercadoItemDoc).item);
+  }
+  return { itemIds, itemsMarked };
 }
 
 async function upsertMealInDailyLog(
