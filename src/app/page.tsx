@@ -3,15 +3,10 @@ import { getSessionUser } from "@/lib/firebase/session";
 import { TopRail } from "@/components/dashboard/TopRail";
 import { CaptureBox } from "@/components/dashboard/CaptureBox";
 import { MercadoCard } from "@/components/dashboard/MercadoCard";
-import {
-  OperatorCard,
-  SessionCard,
-  HabitsCard,
-  CalendarCard,
-  NutritionCard,
-  KeyBlockersCard,
-  FinancePulseCard,
-} from "@/components/dashboard/cards";
+import { BillsCard } from "@/components/dashboard/BillsCard";
+import { TasksByProjectCard } from "@/components/dashboard/TasksByProjectCard";
+import { WeekCalendarCard } from "@/components/dashboard/WeekCalendarCard";
+import { OperatorCard } from "@/components/dashboard/cards";
 import { USER_TIMEZONE } from "@/lib/userConfig";
 
 export const dynamic = "force-dynamic";
@@ -35,22 +30,19 @@ export default async function HomePage() {
     <div className="min-h-screen flex flex-col">
       <TopRail email={user.email} ts={ts.toUpperCase()} />
 
-      <main className="flex-1 px-4 pt-4 pb-32 grid gap-4 md:grid-cols-[260px_minmax(0,1fr)_300px]">
+      <main className="flex-1 px-4 pt-4 pb-32 grid gap-4 md:grid-cols-[280px_minmax(0,1fr)_340px]">
         <aside className="flex flex-col gap-4">
           <OperatorCard name={operatorName} />
           <MercadoCard />
-          <FinancePulseCard />
-          <KeyBlockersCard />
+          <BillsCard />
         </aside>
 
         <section className="flex flex-col gap-4">
-          <SessionCard />
-          <HabitsCard />
-          <CalendarCard />
+          <TasksByProjectCard />
         </section>
 
         <aside className="flex flex-col gap-4">
-          <NutritionCard />
+          <WeekCalendarCard />
         </aside>
       </main>
 

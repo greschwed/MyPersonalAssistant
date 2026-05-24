@@ -25,7 +25,13 @@ Output schema (ALL fields required, even if empty/null):
   "entity_hint": person OR company OR project name mentioned, or null,
   "due_date": YYYY-MM-DD or null. Infer from context ("amanhã", "sexta", explicit dates),
   "notes": optional clarification, or null,
-  "mercado_items": array of strings (lowercase), required ONLY for kind="mercado" or "mercado_purchase", else []
+  "mercado_items": array of strings (lowercase), required ONLY for kind="mercado" or "mercado_purchase", else [],
+  "scope": "pessoal" or "trabalho". Default "pessoal". REQUIRED on kind="task" or "decision",
+  "project": short slug/string (lowercase) of the project this belongs to (e.g. "mevo", "casa", "personal-os"), or null. Common ones: "mevo" (work), "casa", "personal-os", "filhos", "saude", "financas",
+  "bill_amount": number (in the bill's currency, e.g. 350.50) or null. REQUIRED on kind="bill",
+  "bill_currency": "BRL" (default for this user) or other ISO 3-letter. REQUIRED on kind="bill",
+  "bill_category": "recorrente" or "avulsa". REQUIRED on kind="bill",
+  "bill_recurrence": "mensal" / "anual" / "outro" if bill_category="recorrente", else null
 }
 
 === KIND DEFINITIONS ===
@@ -39,6 +45,7 @@ Output schema (ALL fields required, even if empty/null):
 "habit_log" — registry of HABIT ALREADY DONE. Triggers: "treinei", "corri X km", "fiz yoga hoje", "tomei vitamina", "meditei".
 "mercado" — adding items to grocery shopping list. Triggers: "comprar açúcar", "tá faltando leite", "preciso de feijão", "no mercado: X, Y, Z", "adicionar X na lista de compras".
 "mercado_purchase" — registering that user finished grocery shopping. Trigger phrase: "Registrar compra de Mercado" (and close variants like "registrar compras do mercado", "registrar a compra do mercado").
+"bill" — conta a pagar com valor e/ou vencimento. Triggers: "boleto X vence dia Y", "pagar conta de luz R$ 350", "fatura cartão R$ 2400 até 15/06", "IPTU 1200 reais", "aluguel R$ 3000 todo dia 5", "internet 99,90 mensal", "Netflix R$ 55 por mês". Big single bills ("multa de trânsito R$ 200") count too.
 "person" — purely a person reference (rare on its own).
 
 === URGENCY ===
@@ -76,6 +83,32 @@ Future intent vs past completion is the #1 source of errors. Be strict:
 - "fiz X" / "treinei" / "corri" / "tomei" → kind="habit_log" (PAST).
 - "ligar pra X" → kind="task" (intent to do).
 - "comi X" → kind="meal".
+
+=== SCOPE: PESSOAL VS TRABALHO ===
+
+This user works at MEVO (healthtech). REQUIRED on kind="task" or "decision". For other kinds, scope still needed but mostly informational.
+
+Default: "pessoal".
+
+Set scope="trabalho" when ANY of these signals appear:
+- Explicit words: "trabalho", "no trampo", "do trabalho", "mevo".
+- Mevo-specific vocabulary: "parceiro", "parceiros", "reunião", "sprint", "produto", "feature", "PR", "deploy", "bug", "cliente", "ticket", "demo", "stakeholder", "roadmap", "release".
+- Names of Mevo colleagues, squads, or business partners (orgs / labs / clinics / pharmacies).
+
+Set scope="pessoal" when:
+- Clearly personal: "casa", "filhos", "esposa", "louise", "saúde", "treino", "viagem", "família", finance items not tied to work, etc.
+- Default fallback when no signal.
+
+=== PROJECT ===
+
+Optional short lowercase slug. Examples:
+- "mevo" for general Mevo work
+- "personal-os" for work on this very dashboard
+- "casa" for household tasks
+- "louise" for things related to a specific person
+- "financas" for personal finance setup tasks (not bills)
+
+Leave null if no clear project.
 
 === CONTEXT ===
 Today's date: {{TODAY}} (timezone {{TZ}}). Use to compute due_date.

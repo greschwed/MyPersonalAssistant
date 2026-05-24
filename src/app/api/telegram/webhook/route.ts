@@ -109,6 +109,26 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     return;
   }
 
+  if (classification.kind === "bill") {
+    const amount =
+      classification.bill_amount !== null && Number.isFinite(classification.bill_amount)
+        ? new Intl.NumberFormat("pt-BR", {
+            style: "currency",
+            currency: classification.bill_currency || "BRL",
+          }).format(classification.bill_amount)
+        : "valor não informado";
+    const due = classification.due_date ? ` · vence ${classification.due_date}` : "";
+    const recur = classification.bill_category === "recorrente"
+      ? ` · recorrente${classification.bill_recurrence ? ` (${classification.bill_recurrence})` : ""}`
+      : "";
+    await sendMessage({
+      chatId: msg.chat.id,
+      text: `💳 Conta a pagar: ${classification.title}\n${amount}${due}${recur}`,
+      replyToMessageId: msg.message_id,
+    });
+    return;
+  }
+
   if (classification.kind === "mercado_purchase") {
     const items = result.mercadoItems ?? [];
     const text = items.length

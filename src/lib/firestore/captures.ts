@@ -12,6 +12,7 @@ import {
   type TaskDoc,
   type DailyLogDoc,
   type MercadoItemDoc,
+  type BillDoc,
 } from "@/lib/schema";
 
 type IngestInput = {
@@ -73,8 +74,10 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
       tags: input.classification.tags,
       due_date: input.classification.due_date,
       owner: USER_ID,
-      entity_id: null, // resolução de entity virá depois (Fase 4)
+      entity_id: null, // resolução de entity virá depois
       capture_id: captureRef.id,
+      scope: input.classification.scope,
+      project: input.classification.project,
       completed_at: null,
       created_at: now,
       updated_at: now,
@@ -83,6 +86,27 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     routedTo = "tasks";
     routedId = taskRef.id;
     routedIds = [taskRef.id];
+  } else if (input.classification.kind === "bill") {
+    const billRef = db.collection(COL.bills).doc();
+    const bill: BillDoc = {
+      user_id: USER_ID,
+      name: input.classification.title,
+      amount: input.classification.bill_amount,
+      currency: input.classification.bill_currency,
+      category: input.classification.bill_category,
+      recurrence: input.classification.bill_recurrence,
+      due_date: input.classification.due_date,
+      status: "pendente",
+      paid_at: null,
+      capture_id: captureRef.id,
+      raw_text: input.rawText.slice(0, 500),
+      created_at: now,
+      updated_at: now,
+    };
+    await billRef.set(bill);
+    routedTo = "bills";
+    routedId = billRef.id;
+    routedIds = [billRef.id];
   } else if (input.classification.kind === "meal" || input.classification.kind === "habit_log") {
     const date = localDateKey();
     const logId = `${USER_ID}_${date}`;

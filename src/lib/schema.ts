@@ -17,11 +17,24 @@ export const KIND = [
   "habit_log",
   "mercado",          // adiciona itens à lista de compras de supermercado
   "mercado_purchase", // marca itens da lista como comprados
+  "bill",             // conta a pagar (com amount + due_date)
 ] as const;
 export type CaptureKind = (typeof KIND)[number];
 
 export const MERCADO_STATUS = ["A Comprar", "Comprado"] as const;
 export type MercadoStatus = (typeof MERCADO_STATUS)[number];
+
+export const SCOPE = ["pessoal", "trabalho"] as const;
+export type Scope = (typeof SCOPE)[number];
+
+export const BILL_STATUS = ["pendente", "pago"] as const;
+export type BillStatus = (typeof BILL_STATUS)[number];
+
+export const BILL_CATEGORY = ["recorrente", "avulsa"] as const;
+export type BillCategory = (typeof BILL_CATEGORY)[number];
+
+export const BILL_RECURRENCE = ["mensal", "anual", "outro"] as const;
+export type BillRecurrence = (typeof BILL_RECURRENCE)[number];
 
 export const SOURCE = ["telegram_voice", "telegram_text", "web_form", "api"] as const;
 export type CaptureSource = (typeof SOURCE)[number];
@@ -42,6 +55,14 @@ export type Classification = {
   // - mercado: lista de itens a adicionar à lista (1+ itens)
   // - mercado_purchase: itens específicos a marcar como comprados; [] = todos pendentes
   mercado_items: string[];
+  // Específico de kind="task" e kind="decision": separação pessoal/trabalho + projeto livre.
+  scope: Scope;
+  project: string | null;
+  // Específico de kind="bill": conta a pagar, valor + recorrência.
+  bill_amount: number | null;
+  bill_currency: string;       // default "BRL"
+  bill_category: BillCategory; // "recorrente" | "avulsa"
+  bill_recurrence: BillRecurrence | null; // só faz sentido se category="recorrente"
 };
 
 // === FIRESTORE TYPES ===
@@ -53,7 +74,7 @@ export type RawCaptureDoc = {
   audio_url: string | null;
   transcription_source: "whisper" | "telegram" | "none";
   classification: Classification;
-  routed_to: "tasks" | "daily_logs" | "raw_captures" | "mercado" | "mercado_purchase" | null;
+  routed_to: "tasks" | "daily_logs" | "raw_captures" | "mercado" | "mercado_purchase" | "bills" | null;
   routed_id: string | null;
   routed_ids: string[]; // sempre array (0..N); mercado pode rotear pra múltiplos docs
   created_at: Timestamp | FieldValue;
@@ -71,7 +92,25 @@ export type TaskDoc = {
   owner: string;
   entity_id: string | null;
   capture_id: string | null;
+  scope: Scope;             // "pessoal" (default) | "trabalho"
+  project: string | null;   // slug ou string livre (ex: "mevo", "casa", "personal-os")
   completed_at: Timestamp | null;
+  created_at: Timestamp | FieldValue;
+  updated_at: Timestamp | FieldValue;
+};
+
+export type BillDoc = {
+  user_id: string;
+  name: string;
+  amount: number | null;        // null se IA não conseguiu extrair
+  currency: string;             // "BRL" default
+  category: BillCategory;       // "recorrente" | "avulsa"
+  recurrence: BillRecurrence | null;
+  due_date: string | null;      // YYYY-MM-DD
+  status: BillStatus;           // "pendente" (default) | "pago"
+  paid_at: Timestamp | null;
+  capture_id: string | null;
+  raw_text: string;
   created_at: Timestamp | FieldValue;
   updated_at: Timestamp | FieldValue;
 };
@@ -159,6 +198,7 @@ export const COL = {
   memoryChunks: "memory_chunks",
   auditLog: "audit_log",
   mercado: "mercado",
+  bills: "bills",
 } as const;
 
 // Validador defensivo do output do LLM — nunca confiar 100%.
@@ -204,6 +244,33 @@ export function sanitizeClassification(
         .slice(0, 50)
     : [];
 
+  const scope: Scope =
+    (SCOPE as readonly string[]).includes(String(raw.scope))
+      ? (raw.scope as Scope)
+      : "pessoal";
+
+  const project = typeof raw.project === "string" && raw.project.trim().length > 0
+    ? raw.project.trim().toLowerCase().replace(/[^a-z0-9_\- ]+/g, "").slice(0, 60) || null
+    : null;
+
+  const billAmount = typeof raw.bill_amount === "number" && Number.isFinite(raw.bill_amount)
+    ? Math.max(0, raw.bill_amount)
+    : null;
+
+  const billCurrency = typeof raw.bill_currency === "string" && raw.bill_currency.length >= 3
+    ? raw.bill_currency.toUpperCase().slice(0, 3)
+    : "BRL";
+
+  const billCategory: BillCategory =
+    (BILL_CATEGORY as readonly string[]).includes(String(raw.bill_category))
+      ? (raw.bill_category as BillCategory)
+      : "avulsa";
+
+  const billRecurrence: BillRecurrence | null =
+    (BILL_RECURRENCE as readonly string[]).includes(String(raw.bill_recurrence))
+      ? (raw.bill_recurrence as BillRecurrence)
+      : null;
+
   return {
     kind,
     urgency,
@@ -216,5 +283,11 @@ export function sanitizeClassification(
     llm_source: fallback.llmSource,
     notes: typeof raw.notes === "string" ? raw.notes.slice(0, 500) : null,
     mercado_items: mercadoItems,
+    scope,
+    project,
+    bill_amount: billAmount,
+    bill_currency: billCurrency,
+    bill_category: billCategory,
+    bill_recurrence: billRecurrence,
   };
 }

@@ -37,6 +37,9 @@ service cloud.firestore {
     match /mercado/{itemId} {
       allow read, write: if allowed();
     }
+    match /bills/{billId} {
+      allow read, write: if allowed();
+    }
     match /audit_log/{eventId} {
       allow read: if allowed();
       allow create: if allowed();
