@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/firebase/session";
 import { TopRail } from "@/components/dashboard/TopRail";
+import { CaptureBox } from "@/components/dashboard/CaptureBox";
 import {
   OperatorCard,
   SessionCard,
@@ -33,7 +34,7 @@ export default async function HomePage() {
     <div className="min-h-screen flex flex-col">
       <TopRail email={user.email} ts={ts.toUpperCase()} />
 
-      <main className="flex-1 px-4 pt-4 pb-8 grid gap-4 md:grid-cols-[260px_minmax(0,1fr)_300px]">
+      <main className="flex-1 px-4 pt-4 pb-32 grid gap-4 md:grid-cols-[260px_minmax(0,1fr)_300px]">
         <aside className="flex flex-col gap-4">
           <OperatorCard name={operatorName} />
           <FinancePulseCard />
@@ -50,6 +51,8 @@ export default async function HomePage() {
           <NutritionCard />
         </aside>
       </main>
+
+      <CaptureBox />
 
       <footer className="px-6 pb-4 text-[10px] mono text-[var(--ink-3)] flex justify-between">
         <span>PERSONAL OS // V0.1</span>
