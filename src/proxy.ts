@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/firebase/session";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/session", "/api/telegram/webhook"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/api/auth/session",
+  "/api/telegram/webhook",
+  "/api/cron/", // crons do Vercel (auth via Bearer CRON_SECRET no próprio handler)
+];
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
