@@ -46,7 +46,15 @@ Output schema (ALL fields required, even if empty/null):
 "meal" — registry of FOOD ALREADY EATEN. Triggers: "comi X", "almocei Y", "tomei café com Z".
 "habit_log" — registry of HABIT ALREADY DONE. Triggers: "treinei", "corri X km", "fiz yoga hoje", "tomei vitamina", "meditei".
 "mercado" — adding items to grocery shopping list. Triggers: "comprar açúcar", "tá faltando leite", "preciso de feijão", "no mercado: X, Y, Z", "adicionar X na lista de compras".
-"mercado_purchase" — registering that user finished grocery shopping. Trigger phrase: "Registrar compra de Mercado" (and close variants like "registrar compras do mercado", "registrar a compra do mercado").
+"mercado_purchase" — registering that user ALREADY BOUGHT items from the grocery list (past tense). Triggers:
+  - Full purchase: "Registrar compra de Mercado", "registrar compras do mercado", "fiz a compra do mercado", "terminei o mercado", "comprei tudo da lista".
+  - Specific items (past tense): "comprei açúcar e café", "já comprei leite", "marca açúcar como comprado", "tira o feijão da lista, já comprei", "achei o iogurte".
+  IMPORTANT: only past tense / completion ("comprei", "já comprei", "marca como comprado", "tira da lista"). Future intent ("comprar X", "tá faltando X") is kind="mercado".
+"task_complete" — marking an EXISTING task as done (past tense). Triggers:
+  - "fiz a tarefa de X", "concluí X", "terminei X", "finalizei X", "marca X como feita", "marca X como concluída", "tarefa X feita", "já fiz X".
+  - Also fires for "liguei pro João" if "ligar pro João" likely exists as a pending task.
+  IMPORTANT: distinguish from habit_log. habit_log is for recurring physical activities ("treinei", "corri", "meditei"). task_complete is for one-off action items the user previously created.
+  Set: title = the short identifier of the task being completed, stripped of completion verbs (e.g., "fiz a ligação pro João, pode marcar" → title="ligação pro João"). summary = brief explanation. tags=["concluida"]. scheduled_to="este_mes", urgency="someday".
 "bill" — conta a pagar com valor e/ou vencimento. Triggers: "boleto X vence dia Y", "pagar conta de luz R$ 350", "fatura cartão R$ 2400 até 15/06", "IPTU 1200 reais", "aluguel R$ 3000 todo dia 5", "internet 99,90 mensal", "Netflix R$ 55 por mês". Big single bills ("multa de trânsito R$ 200") count too.
   IMPORTANTE pra kind="bill": title é APENAS o nome da conta (ex: "Conta de luz", "Aluguel", "Netflix", "IPTU 2026"). Valor vai em bill_amount, vencimento em due_date, recorrência em bill_recurrence. NÃO repita esses campos no title.
 "query" — user is asking a question or requesting a listing/status of existing data. DO NOT confuse with task. Triggers:
@@ -89,19 +97,33 @@ When kind="mercado":
 - "Fazer mercado" / "ir ao supermercado" is NOT mercado — it's a task (the action of going).
 
 When kind="mercado_purchase":
-- mercado_items = the items explicitly listed AFTER the trigger phrase (e.g., "Registrar compra de mercado: açúcar, banana" → ["açúcar","banana"]). If no items listed, mercado_items=[] (means "mark ALL pending as bought").
+- mercado_items = the items explicitly mentioned as bought (e.g., "comprei açúcar e café" → ["açúcar","café"]; "Registrar compra de mercado: açúcar, banana" → ["açúcar","banana"]). If no items listed (e.g., "fiz o mercado", "comprei tudo"), mercado_items=[] (means "mark ALL pending as bought").
 - title = "Registrar compra de mercado".
 - tags = ["mercado","compras"].
+
+When kind="task_complete":
+- title = the task identifier (stripped of completion verbs). Examples:
+  * "concluí a tarefa de comprar passagem" → title="comprar passagem"
+  * "marca como feita a tarefa de ligar pro Pedro" → title="ligar pro Pedro"
+  * "terminei o relatório do trimestre" → title="relatório do trimestre"
+  * "fiz a apresentação pro cliente" → title="apresentação pro cliente"
+- summary = 1 line restating what was done.
+- tags = ["concluida"].
+- scheduled_to = "este_mes", urgency = "someday" (no horizon needed for a completion).
 
 === CRITICAL DISAMBIGUATION ===
 
 Future intent vs past completion vs question is the #1 source of errors. Be strict:
 - "fazer X amanhã" / "vou fazer X" / "amanhã, fazer X" → kind="task" (FUTURE) with due_date inferred.
-- "fiz X" / "treinei" / "corri" / "tomei" → kind="habit_log" (PAST).
-- "ligar pra X" → kind="task" (intent to do).
-- "comi X" → kind="meal".
+- "treinei" / "corri" / "meditei" / "tomei vitamina" → kind="habit_log" (atividade recorrente já feita).
+- "fiz a tarefa de X" / "concluí X" / "marca X como feita" / "terminei a apresentação" → kind="task_complete" (marca tarefa one-off já criada).
+- "comi X" / "almocei X" / "jantei X" → kind="meal" (refeição já feita).
+- "ligar pra X" / "vou ligar pra X" → kind="task" (intent to do).
+- "liguei pra X" → kind="task_complete" (action just completed; system tries to match an open task).
+- "comprar X" / "tá faltando X" → kind="mercado" (FUTURE shopping intent).
+- "comprei X" / "já comprei X" → kind="mercado_purchase" (PAST purchase, marca da lista).
 - "liste X" / "que tem na X" / "quantos X" / "?" → kind="query" (perguntando sobre estado, NÃO criar task).
-- "Listar lista de compras" → kind="query" (pedido de visualização, não tarefa).
+- "Listar lista de compras" / "mostra meu mercado" → kind="query" (pedido de visualização, não tarefa).
 
 === SCOPE: PESSOAL VS TRABALHO ===
 

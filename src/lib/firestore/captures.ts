@@ -32,6 +32,8 @@ export type IngestResult = {
   memoryChunkId: string | null;
   // Específico de mercado: itens criados / itens marcados como comprados
   mercadoItems?: string[];
+  // Específico de task_complete: tarefas marcadas como concluídas
+  tasksCompleted?: Array<{ id: string; title: string }>;
 };
 
 function priorityScore(c: Classification): number {
@@ -49,6 +51,7 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
   let routedId: string | null = null;
   let routedIds: string[] = [];
   let mercadoItems: string[] | undefined;
+  let tasksCompleted: Array<{ id: string; title: string }> | undefined;
 
   // 1) Decide a coleção alvo + grava o documento downstream
   if (input.classification.kind === "mercado") {
@@ -63,6 +66,12 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     routedIds = result.itemIds;
     routedId = result.itemIds[0] ?? null;
     mercadoItems = result.itemsMarked;
+  } else if (input.classification.kind === "task_complete") {
+    const result = await completeMatchingTasks(db, input.classification);
+    routedTo = "task_complete";
+    routedIds = result.taskIds;
+    routedId = result.taskIds[0] ?? null;
+    tasksCompleted = result.tasks;
   } else if (input.classification.kind === "task" || input.classification.kind === "decision") {
     const taskRef = db.collection(COL.tasks).doc();
     const resolvedDue = dueDateFromScheduledTo(
@@ -187,6 +196,7 @@ export async function ingestCapture(input: IngestInput): Promise<IngestResult> {
     routedIds,
     memoryChunkId,
     mercadoItems,
+    tasksCompleted,
   };
 }
 
@@ -248,6 +258,90 @@ async function registerMercadoPurchase(
     itemsMarked.push((d.data() as MercadoItemDoc).item);
   }
   return { itemIds, itemsMarked };
+}
+
+// Pega o título da capture (já stripado dos verbos de conclusão pelo classifier),
+// quebra em tokens >=3 chars sem acento, e procura a tarefa aberta com maior
+// overlap. Retorna 0..1 task (sempre top-1) pra evitar marcar coisa errada.
+// Se nenhuma tarefa passa do threshold de 1 token forte (>=4 chars) ou 2 tokens
+// curtos, não marca nada.
+async function completeMatchingTasks(
+  db: Firestore,
+  classification: Classification,
+): Promise<{ taskIds: string[]; tasks: Array<{ id: string; title: string }> }> {
+  const query = `${classification.title} ${classification.summary}`;
+  const queryTokens = tokenize(query);
+  if (queryTokens.length === 0) {
+    return { taskIds: [], tasks: [] };
+  }
+
+  const snap = await db
+    .collection(COL.tasks)
+    .where("user_id", "==", USER_ID)
+    .get();
+  const open = snap.docs.filter((d) => {
+    const data = d.data() as TaskDoc;
+    return !data.completed_at;
+  });
+
+  let best: { id: string; title: string; score: number; longestMatch: number; ref: FirebaseFirestore.DocumentReference } | null = null;
+  for (const d of open) {
+    const data = d.data() as TaskDoc;
+    const taskTokens = tokenize(data.title ?? "");
+    if (taskTokens.length === 0) continue;
+    let score = 0;
+    let longestMatch = 0;
+    for (const qt of queryTokens) {
+      for (const tt of taskTokens) {
+        if (qt === tt) {
+          score += qt.length >= 4 ? 2 : 1;
+          if (qt.length > longestMatch) longestMatch = qt.length;
+        } else if (qt.length >= 4 && tt.length >= 4 && (qt.includes(tt) || tt.includes(qt))) {
+          score += 1;
+          const m = Math.min(qt.length, tt.length);
+          if (m > longestMatch) longestMatch = m;
+        }
+      }
+    }
+    if (score === 0) continue;
+    if (!best || score > best.score || (score === best.score && longestMatch > best.longestMatch)) {
+      best = { id: d.id, title: data.title ?? "", score, longestMatch, ref: d.ref };
+    }
+  }
+
+  // Threshold: pelo menos 1 token longo (>=4 chars) OU score >= 3 (ex: 2 tokens curtos batendo)
+  if (!best || (best.longestMatch < 4 && best.score < 3)) {
+    return { taskIds: [], tasks: [] };
+  }
+
+  await best.ref.update({
+    completed_at: FieldValue.serverTimestamp(),
+    updated_at: FieldValue.serverTimestamp(),
+  });
+  return {
+    taskIds: [best.id],
+    tasks: [{ id: best.id, title: best.title }],
+  };
+}
+
+// Tokeniza para matching: lowercase, sem acentos, sem pontuação,
+// remove stopwords curtas e palavras genéricas que não ajudam o match.
+const TASK_MATCH_STOPWORDS = new Set([
+  "a", "o", "as", "os", "de", "da", "do", "das", "dos", "e", "em", "no", "na",
+  "nos", "nas", "para", "pra", "pro", "por", "que", "com", "um", "uma",
+  "uns", "umas", "tarefa", "tarefas", "feita", "feito", "concluida",
+  "concluido", "concluído", "concluída", "fiz", "marca", "marcar", "como",
+  "ja", "já", "ali", "isso", "esse", "essa", "este", "esta",
+]);
+
+function tokenize(s: string): string[] {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9\s]+/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length >= 3 && !TASK_MATCH_STOPWORDS.has(t));
 }
 
 async function upsertMealInDailyLog(

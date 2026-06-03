@@ -35,23 +35,73 @@ export function MercadoCard() {
   const [data, setData] = useState<MercadoResp | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [pendingBought, setPendingBought] = useState<Set<string>>(new Set());
+
+  async function refresh() {
+    try {
+      const r = await fetch("/api/mercado", { cache: "no-store" });
+      const d: MercadoResp = await r.json();
+      if (!d.ok) setError(d.error ?? "erro");
+      else setError(null);
+      setData(d);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro");
+    }
+  }
 
   useEffect(() => {
-    let canceled = false;
-    fetch("/api/mercado")
-      .then((r) => r.json())
-      .then((d: MercadoResp) => {
-        if (canceled) return;
-        if (!d.ok) setError(d.error ?? "erro");
-        setData(d);
-      })
-      .catch((err) => {
-        if (!canceled) setError(err instanceof Error ? err.message : "erro");
-      });
-    return () => {
-      canceled = true;
-    };
+    refresh();
   }, []);
+
+  async function markBought(id: string) {
+    setPendingBought((s) => new Set([...s, id]));
+    try {
+      const res = await fetch(`/api/mercado/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bought: true }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError((d as { error?: string }).error ?? `erro ${res.status}`);
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro");
+    } finally {
+      setPendingBought((s) => {
+        const c = new Set(s);
+        c.delete(id);
+        return c;
+      });
+    }
+  }
+
+  async function unmarkBought(id: string) {
+    setPendingBought((s) => new Set([...s, id]));
+    try {
+      const res = await fetch(`/api/mercado/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bought: false }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError((d as { error?: string }).error ?? `erro ${res.status}`);
+        return;
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "erro");
+    } finally {
+      setPendingBought((s) => {
+        const c = new Set(s);
+        c.delete(id);
+        return c;
+      });
+    }
+  }
 
   const pending = data?.pending ?? [];
   const bought = data?.bought ?? [];
@@ -75,17 +125,30 @@ export function MercadoCard() {
 
       {pending.length > 0 && (
         <ul className="flex flex-col gap-1.5">
-          {pending.map((row) => (
-            <li
-              key={row.id}
-              className="flex items-center justify-between text-xs px-2 py-1.5 rounded border hairline bg-[var(--ink-1)]/40"
-            >
-              <span className="capitalize">{row.item}</span>
-              <span className="mono text-[10px] text-[var(--ink-3)]">
-                {relativeTime(row.createdAt)}
-              </span>
-            </li>
-          ))}
+          {pending.map((row) => {
+            const inFlight = pendingBought.has(row.id);
+            return (
+              <li
+                key={row.id}
+                className={`flex items-center gap-2 text-xs px-2 py-1.5 rounded border hairline bg-[var(--ink-1)]/40 transition ${
+                  inFlight ? "opacity-50" : ""
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => markBought(row.id)}
+                  disabled={inFlight}
+                  title="Marcar como comprado"
+                  aria-label="Marcar como comprado"
+                  className="w-4 h-4 rounded-full border border-[var(--ink-3)] hover:border-[var(--ok)] hover:bg-[var(--ok)]/20 transition shrink-0"
+                />
+                <span className="capitalize flex-1 truncate">{row.item}</span>
+                <span className="mono text-[10px] text-[var(--ink-3)] shrink-0">
+                  {relativeTime(row.createdAt)}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -100,17 +163,30 @@ export function MercadoCard() {
           </button>
           {showHistory && (
             <ul className="mt-2 flex flex-col gap-1">
-              {bought.map((row) => (
-                <li
-                  key={row.id}
-                  className="flex items-center justify-between text-[11px] text-[var(--ink-3)] px-2"
-                >
-                  <span className="capitalize line-through">{row.item}</span>
-                  <span className="mono text-[10px]">
-                    {relativeTime(row.boughtAt)}
-                  </span>
-                </li>
-              ))}
+              {bought.map((row) => {
+                const inFlight = pendingBought.has(row.id);
+                return (
+                  <li
+                    key={row.id}
+                    className={`flex items-center gap-2 text-[11px] text-[var(--ink-3)] px-2 transition ${
+                      inFlight ? "opacity-50" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => unmarkBought(row.id)}
+                      disabled={inFlight}
+                      title="Desmarcar (voltar pra lista)"
+                      aria-label="Desmarcar"
+                      className="w-3.5 h-3.5 rounded-full border border-[var(--ok)] bg-[var(--ok)]/30 hover:bg-transparent transition shrink-0"
+                    />
+                    <span className="capitalize line-through flex-1 truncate">{row.item}</span>
+                    <span className="mono text-[10px] shrink-0">
+                      {relativeTime(row.boughtAt)}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

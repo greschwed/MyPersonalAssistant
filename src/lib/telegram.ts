@@ -77,6 +77,38 @@ export async function answerCallback(callbackQueryId: string, text: string): Pro
   });
 }
 
+export type EditMessageOptions = {
+  chatId: number;
+  messageId: number;
+  text: string;
+  inlineKeyboard?: { text: string; callback_data: string }[][];
+  parseMode?: "Markdown" | "HTML";
+};
+
+// Edita o conteúdo + teclado de uma mensagem já enviada. Usado quando o user
+// aperta um botão inline (ex: marcar item comprado) e a gente quer atualizar
+// a mesma mensagem em vez de mandar outra.
+export async function editMessageText(opts: EditMessageOptions): Promise<void> {
+  const t = token();
+  const body: Record<string, unknown> = {
+    chat_id: opts.chatId,
+    message_id: opts.messageId,
+    text: opts.text,
+  };
+  if (opts.parseMode) body.parse_mode = opts.parseMode;
+  if (opts.inlineKeyboard) {
+    body.reply_markup = { inline_keyboard: opts.inlineKeyboard };
+  }
+  const resp = await fetch(`${BASE}/bot${t}/editMessageText`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    console.error("[telegram] editMessageText failed", resp.status, await resp.text());
+  }
+}
+
 // Tipos mínimos do payload do webhook (apenas o que usamos)
 export type TelegramUpdate = {
   update_id: number;

@@ -37,6 +37,7 @@ export const KIND = [
   "habit_log",
   "mercado",          // adiciona itens à lista de compras de supermercado
   "mercado_purchase", // marca itens da lista como comprados
+  "task_complete",    // marca tarefa(s) existente(s) como concluída(s)
   "bill",             // conta a pagar (com amount + due_date)
   "query",            // pergunta / pedido de listagem (não cria registro, responde)
 ] as const;
@@ -98,7 +99,15 @@ export type RawCaptureDoc = {
   audio_url: string | null;
   transcription_source: "whisper" | "telegram" | "none";
   classification: Classification;
-  routed_to: "tasks" | "daily_logs" | "raw_captures" | "mercado" | "mercado_purchase" | "bills" | null;
+  routed_to:
+    | "tasks"
+    | "daily_logs"
+    | "raw_captures"
+    | "mercado"
+    | "mercado_purchase"
+    | "task_complete"
+    | "bills"
+    | null;
   routed_id: string | null;
   routed_ids: string[]; // sempre array (0..N); mercado pode rotear pra múltiplos docs
   created_at: Timestamp | FieldValue;

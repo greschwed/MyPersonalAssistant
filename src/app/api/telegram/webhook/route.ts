@@ -3,13 +3,21 @@ import {
   type TelegramUpdate,
   downloadVoice,
   sendMessage,
+  editMessageText,
   answerCallback,
 } from "@/lib/telegram";
 import { transcribeAudio } from "@/lib/whisper";
 import { classifyCapture } from "@/lib/router/classifyCapture";
 import { ingestCapture } from "@/lib/firestore/captures";
 import { adminDb } from "@/lib/firebase/admin";
-import { COL, type RawCaptureDoc, URGENCY, type Urgency } from "@/lib/schema";
+import {
+  COL,
+  type MercadoItemDoc,
+  type RawCaptureDoc,
+  type TaskDoc,
+  URGENCY,
+  type Urgency,
+} from "@/lib/schema";
 import { FieldValue } from "firebase-admin/firestore";
 import { USER_ID } from "@/lib/userConfig";
 import { answerQuestion } from "@/lib/llm/answerQuestion";
@@ -17,6 +25,10 @@ import { answerQuestion } from "@/lib/llm/answerQuestion";
 export const runtime = "nodejs";
 
 const ALLOWED_USER_ID = Number(process.env.TELEGRAM_USER_ID ?? "0");
+
+// Limite prático: Telegram aceita keyboards grandes mas vira parede de botões.
+// Mostra os N primeiros e avisa que tem mais.
+const MERCADO_LIST_MAX_BUTTONS = 15;
 
 export async function POST(req: Request) {
   // 1) Verifica segredo do header (Telegram envia se foi configurado no setWebhook)
@@ -83,6 +95,15 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
       chatId: msg.chat.id,
       text: "Manda texto ou áudio. Outras mídias eu ignoro.",
     });
+    return;
+  }
+
+  // 3.5) Pré-classifier: se for pedido explícito de listar o mercado,
+  // mostra a lista com botões inline pra marcar como comprado.
+  // Isso curto-circuita o classifier porque é puramente uma ação de UI,
+  // não vale a pena gastar token nem criar raw_capture.
+  if (isMercadoListIntent(rawText)) {
+    await sendMercadoList(msg.chat.id, msg.message_id);
     return;
   }
 
@@ -173,6 +194,28 @@ async function handleMessage(msg: NonNullable<TelegramUpdate["message"]>) {
     return;
   }
 
+  if (classification.kind === "task_complete") {
+    const tasks = result.tasksCompleted ?? [];
+    if (tasks.length === 0) {
+      await sendMessage({
+        chatId: msg.chat.id,
+        text: `⚠️ Não encontrei nenhuma tarefa aberta que case com: "${classification.title}".\n\nMande "listar tarefas" pra ver as ativas.`,
+        replyToMessageId: msg.message_id,
+      });
+      return;
+    }
+    const t = tasks[0];
+    await sendMessage({
+      chatId: msg.chat.id,
+      text: `✅ Tarefa concluída: ${t.title}`,
+      replyToMessageId: msg.message_id,
+      inlineKeyboard: [
+        [{ text: "↩️ Desfazer", callback_data: `task_undo:${t.id}` }],
+      ],
+    });
+    return;
+  }
+
   // Default: task/decision/note/idea/meal/habit_log → keyboard de scheduled_to+key
   const scheduledLabel = {
     hoje: "Hoje",
@@ -233,6 +276,33 @@ async function handleCallback(cb: NonNullable<TelegramUpdate["callback_query"]>)
     }
     await toggleKey(captureId);
     await answerCallback(cb.id, "KEY alternado.");
+  } else if (op === "mercado_done") {
+    const [itemId] = rest;
+    if (!itemId) {
+      await answerCallback(cb.id, "ID ausente.");
+      return;
+    }
+    const itemName = await markMercadoBought(itemId);
+    await answerCallback(cb.id, itemName ? `✅ ${itemName}` : "Item não encontrado.");
+    // Re-renderiza a lista na mesma mensagem
+    if (cb.message?.chat?.id && cb.message.message_id) {
+      await refreshMercadoListMessage(cb.message.chat.id, cb.message.message_id);
+    }
+  } else if (op === "task_undo") {
+    const [taskId] = rest;
+    if (!taskId) {
+      await answerCallback(cb.id, "ID ausente.");
+      return;
+    }
+    const title = await undoTaskComplete(taskId);
+    await answerCallback(cb.id, title ? `↩️ Reaberta: ${title}` : "Tarefa não encontrada.");
+    if (cb.message?.chat?.id && cb.message.message_id && title) {
+      await editMessageText({
+        chatId: cb.message.chat.id,
+        messageId: cb.message.message_id,
+        text: `↩️ Tarefa reaberta: ${title}`,
+      });
+    }
   } else {
     await answerCallback(cb.id, "Comando desconhecido.");
   }
@@ -292,6 +362,124 @@ async function toggleKey(captureId: string) {
 function priorityScore(urgency: Urgency, key: boolean): number {
   const urgencyWeight = { today: 100, this_week: 60, this_month: 30, someday: 10 }[urgency];
   return urgencyWeight + (key ? 50 : 0);
+}
+
+// === Helpers para o fluxo de mercado via Telegram ===
+
+// Heurística: detecta pedidos curtos pra ver a lista. Mantém amplo o suficiente
+// pra pegar variações comuns mas sem consumir "comprei", "comprar", etc.
+function isMercadoListIntent(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  if (t === "/mercado" || t === "/lista" || t === "/compras") return true;
+  // bate "listar mercado", "mostra a lista de mercado", "ver minha lista de compras", etc.
+  if (/\b(listar|mostrar?|exibir|ver|qual)\b[^?\n]{0,30}\b(mercado|lista de (mercado|compras)|lista do mercado)\b/.test(t)) {
+    return true;
+  }
+  if (/^(minha )?lista de (mercado|compras)\??$/.test(t)) return true;
+  if (/^mercado\??$/.test(t)) return true;
+  if (/^mercado pendentes?$/.test(t)) return true;
+  if (/\bque (tem|falta) (na |no )?(lista|mercado)\b/.test(t)) return true;
+  return false;
+}
+
+async function fetchPendingMercado(): Promise<Array<{ id: string; item: string }>> {
+  const snap = await adminDb
+    .collection(COL.mercado)
+    .where("user_id", "==", USER_ID)
+    .where("status", "==", "A Comprar")
+    .get();
+  return snap.docs
+    .map((d) => ({ id: d.id, item: (d.data() as MercadoItemDoc).item }))
+    .sort((a, b) => a.item.localeCompare(b.item));
+}
+
+function buildMercadoListMessage(items: Array<{ id: string; item: string }>): {
+  text: string;
+  keyboard: { text: string; callback_data: string }[][];
+} {
+  if (items.length === 0) {
+    return {
+      text: "🛒 Lista de mercado vazia.\n\nMande \"Comprar X, Y, Z\" pra adicionar.",
+      keyboard: [],
+    };
+  }
+  const visible = items.slice(0, MERCADO_LIST_MAX_BUTTONS);
+  const hidden = items.length - visible.length;
+  const lines = [`🛒 Lista de mercado (${items.length} item${items.length === 1 ? "" : "s"}):`, ""];
+  for (const it of visible) lines.push(`• ${it.item}`);
+  if (hidden > 0) lines.push(`  ...+${hidden} (toca um abaixo pra marcar como comprado)`);
+  else lines.push("", "Toca pra marcar como comprado:");
+
+  const keyboard: { text: string; callback_data: string }[][] = visible.map((it) => [
+    { text: `✓ ${it.item}`.slice(0, 60), callback_data: `mercado_done:${it.id}` },
+  ]);
+  return { text: lines.join("\n"), keyboard };
+}
+
+async function sendMercadoList(chatId: number, replyToMessageId: number) {
+  const items = await fetchPendingMercado();
+  const { text, keyboard } = buildMercadoListMessage(items);
+  await sendMessage({
+    chatId,
+    text,
+    replyToMessageId,
+    inlineKeyboard: keyboard.length ? keyboard : undefined,
+  });
+}
+
+async function refreshMercadoListMessage(chatId: number, messageId: number) {
+  const items = await fetchPendingMercado();
+  const { text, keyboard } = buildMercadoListMessage(items);
+  await editMessageText({
+    chatId,
+    messageId,
+    text,
+    inlineKeyboard: keyboard.length ? keyboard : undefined,
+  });
+}
+
+async function markMercadoBought(itemId: string): Promise<string | null> {
+  const ref = adminDb.collection(COL.mercado).doc(itemId);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const data = snap.data() as MercadoItemDoc;
+  if (data.user_id !== USER_ID) return null;
+  if (data.status === "Comprado") return data.item; // idempotente
+  await ref.update({
+    status: "Comprado",
+    bought_at: FieldValue.serverTimestamp(),
+  });
+  await adminDb.collection(COL.auditLog).add({
+    user_id: USER_ID,
+    action: "mercado_update",
+    resource_type: "mercado_item",
+    resource_id: itemId,
+    metadata: { status: "Comprado", item: data.item, via: "telegram_button" },
+    created_at: FieldValue.serverTimestamp(),
+  });
+  return data.item;
+}
+
+async function undoTaskComplete(taskId: string): Promise<string | null> {
+  const ref = adminDb.collection(COL.tasks).doc(taskId);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const cur = snap.data() as TaskDoc;
+  if (cur.user_id !== USER_ID) return null;
+  await ref.update({
+    completed_at: null,
+    updated_at: FieldValue.serverTimestamp(),
+  });
+  await adminDb.collection(COL.auditLog).add({
+    user_id: USER_ID,
+    action: "task_update",
+    resource_type: "task",
+    resource_id: taskId,
+    metadata: { completed: false, via: "telegram_undo" },
+    created_at: FieldValue.serverTimestamp(),
+  });
+  return cur.title ?? null;
 }
 
 // Para o setup inicial do webhook é útil ter GET — Vercel/Telegram não usa, mas dá pra testar saúde.
